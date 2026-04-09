@@ -68,12 +68,19 @@ pub const HashRing = struct {
         if (self.weights.items.len == 0) return null;
 
         const key_hash = hashBytes(key);
-        for (self.weights.items) |w| {
-            if (w.hash >= key_hash) {
-                return self.nodes.items[w.node_index].name;
+
+        var left: usize = 0;
+        var right: usize = self.weights.items.len;
+        while (left < right) {
+            const mid = left + (right - left) / 2;
+            if (self.weights.items[mid].hash < key_hash) {
+                left = mid + 1;
+            } else {
+                right = mid;
             }
         }
-        return self.nodes.items[self.weights.items[0].node_index].name;
+        const idx: usize = if (left == self.weights.items.len) 0 else left;
+        return self.nodes.items[self.weights.items[idx].node_index].name;
     }
 
     pub fn removeNode(self: *HashRing, node: []const u8) !void {
