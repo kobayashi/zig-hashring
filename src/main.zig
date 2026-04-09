@@ -19,12 +19,14 @@ pub const HashRing = struct {
     alloc: std.mem.Allocator,
     nodes: std.ArrayList(Node),
     weights: std.ArrayList(Weight),
+    replicas: usize,
 
-    pub fn init(a: std.mem.Allocator) HashRing {
+    pub fn init(a: std.mem.Allocator, replica_count: usize) HashRing {
         return .{
             .alloc = a,
             .nodes = std.ArrayList(Node).empty,
             .weights = std.ArrayList(Weight).empty,
+            .replicas = replica_count,
         };
     }
 
@@ -55,11 +57,18 @@ pub const HashRing = struct {
             },
         );
         errdefer _ = self.nodes.pop();
-        const w: Weight = .{
-            .hash = hashBytes(copy_node),
-            .node_index = self.nodes.items.len - 1,
-        };
-        try self.weights.append(self.alloc, w);
+
+        var i: usize = 0;
+        while (i < self.replicas) : (i += 1) {
+            var buf: [64]u8 = undefined;
+            const vnode: []const u8 = try std.fmt.bufPrint(&buf, "{s}#{d}", .{ copy_node, i });
+
+            const w: Weight = .{
+                .hash = hashBytes(vnode),
+                .node_index = self.nodes.items.len - 1,
+            };
+            try self.weights.append(self.alloc, w);
+        }
 
         std.sort.block(Weight, self.weights.items, {}, lessThan);
     }
@@ -99,11 +108,16 @@ pub const HashRing = struct {
             try new_nodes.append(self.alloc, .{ .name = copy_name });
             errdefer _ = new_nodes.pop();
 
-            const w: Weight = .{
-                .hash = hashBytes(node),
-                .node_index = new_nodes.items.len - 1,
-            };
-            try new_weights.append(self.alloc, w);
+            var i: usize = 0;
+            while (i < self.replicas) : (i += 1) {
+                var buf: [64]u8 = undefined;
+                const vnode: []const u8 = try std.fmt.bufPrint(&buf, "{s}#{d}", .{ copy_name, i });
+                const w: Weight = .{
+                    .hash = hashBytes(vnode),
+                    .node_index = new_nodes.items.len - 1,
+                };
+                try new_weights.append(self.alloc, w);
+            }
         }
         std.sort.block(Weight, new_weights.items, {}, struct {
             fn lessThan(_: void, a: Weight, b: Weight) bool {
@@ -129,7 +143,7 @@ pub fn main() void {}
 const testing = std.testing;
 
 test "addNode adds nodes" {
-    var ring = HashRing.init(testing.allocator);
+    var ring = HashRing.init(testing.allocator, 3);
     defer ring.deinit();
 
     try ring.addNode("node-a");
@@ -137,18 +151,19 @@ test "addNode adds nodes" {
     try ring.addNode("node-c");
 
     try testing.expectEqual(@as(usize, 3), ring.nodes.items.len);
-    try testing.expectEqual(@as(usize, 3), ring.weights.items.len);
+    try testing.expectEqual(@as(usize, 9), ring.weights.items.len);
 
     for (ring.weights.items[0 .. ring.weights.items.len - 1], 0..) |w, i| {
         try testing.expect(w.hash < ring.weights.items[i + 1].hash);
     }
 
     try testing.expectError(HashRingError.DuplicateNode, ring.addNode("node-a"));
-    try testing.expectEqual(@as(usize, 3), ring.weights.items.len);
+    try testing.expectEqual(@as(usize, 3), ring.nodes.items.len);
+    try testing.expectEqual(@as(usize, 9), ring.weights.items.len);
 }
 
 test "addNode copies node name" {
-    var ring = HashRing.init(testing.allocator);
+    var ring = HashRing.init(testing.allocator, 1);
     defer ring.deinit();
 
     var buf = [_]u8{ 'n', 'o', 'd', 'e', '-', 'a' };
@@ -160,7 +175,7 @@ test "addNode copies node name" {
 }
 
 test "getNode returns nodes or null" {
-    var ring = HashRing.init(testing.allocator);
+    var ring = HashRing.init(testing.allocator, 1);
     defer ring.deinit();
 
     try testing.expect(ring.getNode("foo:1") == null);
@@ -178,7 +193,7 @@ test "getNode returns nodes or null" {
 }
 
 test "weights are sorted" {
-    var ring = HashRing.init(testing.allocator);
+    var ring = HashRing.init(testing.allocator, 1);
     defer ring.deinit();
 
     try ring.addNode("node-b");
@@ -192,7 +207,7 @@ test "weights are sorted" {
 }
 
 test "removeNode removes nodes" {
-    var ring = HashRing.init(testing.allocator);
+    var ring = HashRing.init(testing.allocator, 3);
     defer ring.deinit();
 
     try ring.addNode("node-a");
@@ -202,7 +217,7 @@ test "removeNode removes nodes" {
     try ring.removeNode("node-b");
 
     try testing.expectEqual(@as(usize, 2), ring.nodes.items.len);
-    try testing.expectEqual(@as(usize, 2), ring.weights.items.len);
+    try testing.expectEqual(@as(usize, 6), ring.weights.items.len);
 
     for (ring.nodes.items) |n| {
         try testing.expect(!std.mem.eql(u8, n.name, "node-b"));
@@ -210,6 +225,7 @@ test "removeNode removes nodes" {
 
     try ring.removeNode("node-z");
     try testing.expectEqual(@as(usize, 2), ring.nodes.items.len);
+    try testing.expectEqual(@as(usize, 6), ring.weights.items.len);
 
     var i: usize = 0;
     while (i < 20) : (i += 1) {
