@@ -9,7 +9,10 @@ const Weight = struct {
     node_index: usize,
 };
 
-const HashRingError = error{DuplicateNode};
+const HashRingError = error{
+    DuplicateNode,
+    InvalidReplicaCount,
+};
 
 fn lessThan(_: void, a: Weight, b: Weight) bool {
     return a.hash < b.hash;
@@ -21,7 +24,8 @@ pub const HashRing = struct {
     weights: std.ArrayList(Weight),
     replicas: usize,
 
-    pub fn init(a: std.mem.Allocator, replica_count: usize) HashRing {
+    pub fn init(a: std.mem.Allocator, replica_count: usize) !HashRing {
+        if (replica_count == 0) return HashRingError.InvalidReplicaCount;
         return .{
             .alloc = a,
             .nodes = std.ArrayList(Node).empty,
@@ -142,8 +146,15 @@ pub fn main() void {}
 
 const testing = std.testing;
 
+test "init rejects zero replicas" {
+    try testing.expectError(
+        HashRingError.InvalidReplicaCount,
+        HashRing.init(testing.allocator, 0),
+    );
+}
+
 test "addNode adds nodes" {
-    var ring = HashRing.init(testing.allocator, 3);
+    var ring = try HashRing.init(testing.allocator, 3);
     defer ring.deinit();
 
     try ring.addNode("node-a");
@@ -163,7 +174,7 @@ test "addNode adds nodes" {
 }
 
 test "addNode copies node name" {
-    var ring = HashRing.init(testing.allocator, 1);
+    var ring = try HashRing.init(testing.allocator, 1);
     defer ring.deinit();
 
     var buf = [_]u8{ 'n', 'o', 'd', 'e', '-', 'a' };
@@ -175,7 +186,7 @@ test "addNode copies node name" {
 }
 
 test "getNode returns nodes or null" {
-    var ring = HashRing.init(testing.allocator, 1);
+    var ring = try HashRing.init(testing.allocator, 1);
     defer ring.deinit();
 
     try testing.expect(ring.getNode("foo:1") == null);
@@ -193,7 +204,7 @@ test "getNode returns nodes or null" {
 }
 
 test "weights are sorted" {
-    var ring = HashRing.init(testing.allocator, 1);
+    var ring = try HashRing.init(testing.allocator, 1);
     defer ring.deinit();
 
     try ring.addNode("node-b");
@@ -207,7 +218,7 @@ test "weights are sorted" {
 }
 
 test "removeNode removes nodes" {
-    var ring = HashRing.init(testing.allocator, 3);
+    var ring = try HashRing.init(testing.allocator, 3);
     defer ring.deinit();
 
     try ring.addNode("node-a");
