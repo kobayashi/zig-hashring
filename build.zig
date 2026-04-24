@@ -6,11 +6,21 @@ pub fn build(b: *std.Build) void {
 
     const unit_tests = b.addTest(.{
         .root_module = b.createModule(.{
+            .root_source_file = b.path("src/hashring.zig"),
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+
+    const exe = b.addExecutable(.{
+        .name = "hashring",
+        .root_module = b.createModule(.{
             .root_source_file = b.path("src/main.zig"),
             .target = target,
             .optimize = optimize,
         }),
     });
+    b.installArtifact(exe);
 
     const run_unit_tests = b.addRunArtifact(unit_tests);
 
